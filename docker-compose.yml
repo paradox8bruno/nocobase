@@ -44,7 +44,7 @@ services:
     volumes:
       - ../files/nocobase-redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -93,11 +93,9 @@ services:
       DB_TABLE_PREFIX: ${DB_TABLE_PREFIX:-}
       DB_LOGGING: ${DB_LOGGING:-false}
       
-      # Configurações de Cache Redis
+      # Configurações de Cache Redis (FORMATO CORRETO!)
       CACHE_DEFAULT_STORE: redis
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      CACHE_REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       
       # Timezone
       TZ: ${TIMEZONE}
