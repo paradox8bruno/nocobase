@@ -107,9 +107,9 @@ services:
       # Volume principal do NocoBase (CRÍTICO!)
       - ../files/nocobase-storage:/app/nocobase/storage
     
-    expose:
-      # Expõe porta 80 apenas na rede interna do Docker
-      - "80"
+    ports:
+      # A imagem oficial do NocoBase expõe a porta 80 internamente
+      - "13000:80"
     
     depends_on:
       postgres:
