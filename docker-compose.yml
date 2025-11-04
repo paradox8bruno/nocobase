@@ -80,50 +80,38 @@ services:
       - nocobase
       - dokploy-network
     environment:
-      # Configurações da Aplicação
-      APP_ENV: ${APP_ENV}
-      APP_HOST: ${APP_HOST}
-      APP_PORT: ${APP_PORT}
+      # CRITICAL: Chave secreta da aplicação (NUNCA mude depois da primeira instalação!)
       APP_KEY: ${APP_KEY}
-      API_BASE_PATH: ${API_BASE_PATH}
-      API_BASE_URL: ${API_BASE_URL}
       
-      # Configurações do Banco de Dados
-      DB_DIALECT: ${DB_DIALECT}
+      # Configurações do Banco de Dados PostgreSQL
+      DB_DIALECT: postgres
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
       DB_DATABASE: ${DB_DATABASE}
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      DB_TABLE_PREFIX: ${DB_TABLE_PREFIX}
-      DB_LOGGING: ${DB_LOGGING}
+      DB_TABLE_PREFIX: ${DB_TABLE_PREFIX:-}
+      DB_LOGGING: ${DB_LOGGING:-false}
       
-      # Configurações de Cache
-      CACHE_DEFAULT_STORE: ${CACHE_DEFAULT_STORE}
-      CACHE_REDIS_URL: ${CACHE_REDIS_URL}
-      
-      # Configurações de Storage
-      STORAGE_TYPE: ${STORAGE_TYPE}
-      STORAGE_BASE_URL: ${STORAGE_BASE_URL}
+      # Configurações de Cache Redis
+      CACHE_DEFAULT_STORE: redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       
       # Timezone
       TZ: ${TIMEZONE}
       
-      # Configurações de Email (opcional)
-      MAIL_DRIVER: ${MAIL_DRIVER}
-      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS}
-      MAIL_FROM_NAME: ${MAIL_FROM_NAME}
-      
-      # Configurações de Limite
-      LOGGER_TRANSPORT: ${LOGGER_TRANSPORT}
-      LOGGER_BASE_PATH: ${LOGGER_BASE_PATH}
+      # Configurações de Storage Local
+      LOCAL_STORAGE_BASE_URL: ${STORAGE_BASE_URL}
     
     volumes:
-      - ../files/nocobase-storage:/app/storage
-      - ../files/nocobase-uploads:/app/uploads
+      # Volume principal do NocoBase (CRÍTICO!)
+      - ../files/nocobase-storage:/app/nocobase/storage
     
-    expose:
-      - "${APP_PORT}"
+    ports:
+      # A imagem oficial do NocoBase expõe a porta 80 internamente
+      - "13000:80"
     
     depends_on:
       postgres:
@@ -136,11 +124,11 @@ services:
       - "traefik.http.routers.nocobase-app.rule=Host(`${APP_DOMAIN}`)"
       - "traefik.http.routers.nocobase-app.entrypoints=websecure"
       - "traefik.http.routers.nocobase-app.tls.certresolver=letsencrypt"
-      - "traefik.http.services.nocobase-app.loadbalancer.server.port=${APP_PORT}"
+      - "traefik.http.services.nocobase-app.loadbalancer.server.port=80"
     
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${APP_PORT}/api/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/api/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 60s
+      retries: 5
+      start_period: 90s
