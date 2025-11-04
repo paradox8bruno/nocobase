@@ -28,28 +28,28 @@ services:
       timeout: 5s
       retries: 5
 
-  # Banco de Dados PostgreSQL (alternativa ao MySQL)
-  postgres:
-    image: postgres:16-alpine
-    container_name: nocobase-postgres
-    restart: always
-    networks:
-      - nocobase
-    command: postgres -c wal_level=logical
-    environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_DB: ${DB_DATABASE}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      PGDATA: /var/lib/postgresql/data/pgdata
-      TZ: ${TIMEZONE}
-    volumes:
-      - ../files/nocobase-postgres:/var/lib/postgresql/data
-      - ../files/nocobase-postgres-backups:/backups
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_DATABASE}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # Banco de Dados PostgreSQL (alternativa ao MySQL - comentado por padrão)
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: nocobase-postgres
+  #   restart: always
+  #   networks:
+  #     - nocobase
+  #   command: postgres -c wal_level=logical
+  #   environment:
+  #     POSTGRES_USER: ${DB_USER}
+  #     POSTGRES_DB: ${DB_DATABASE}
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
+  #     PGDATA: /var/lib/postgresql/data/pgdata
+  #     TZ: ${TIMEZONE}
+  #   volumes:
+  #     - ../files/nocobase-postgres:/var/lib/postgresql/data
+  #     - ../files/nocobase-postgres-backups:/backups
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_DATABASE}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
   # Redis (Cache e Sessões)
   redis:
@@ -80,16 +80,16 @@ services:
     environment:
       ADMINER_DEFAULT_SERVER: ${DB_HOST}
       TZ: ${TIMEZONE}
+    expose:
+      - "8080"
     depends_on:
       - mysql
-      - postgres
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.nocobase-adminer.rule=Host(`${ADMINER_DOMAIN}`)"
       - "traefik.http.routers.nocobase-adminer.entrypoints=websecure"
       - "traefik.http.routers.nocobase-adminer.tls.certresolver=letsencrypt"
       - "traefik.http.services.nocobase-adminer.loadbalancer.server.port=8080"
-      - "traefik.docker.network=dokploy-network"
 
   # Aplicação NocoBase
   nocobase:
@@ -142,26 +142,21 @@ services:
       - ../files/nocobase-storage:/app/storage
       - ../files/nocobase-uploads:/app/uploads
     
+    expose:
+      - "${APP_PORT}"
+    
     depends_on:
       mysql:
-        condition: service_healthy
-      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.nocobase.rule=Host(`${APP_DOMAIN}`)"
-      - "traefik.http.routers.nocobase.entrypoints=websecure"
-      - "traefik.http.routers.nocobase.tls.certresolver=letsencrypt"
-      - "traefik.http.services.nocobase.loadbalancer.server.port=${APP_PORT}"
-      - "traefik.docker.network=dokploy-network"
-      
-      # Headers de Segurança
-      - "traefik.http.middlewares.nocobase-headers.headers.customResponseHeaders.X-Robots-Tag=none,noarchive,nosnippet,notranslate,noimageindex"
-      - "traefik.http.middlewares.nocobase-headers.headers.sslProxyHeaders.X-Forwarded-Proto=https"
-      - "traefik.http.routers.nocobase.middlewares=nocobase-headers"
+      - "traefik.http.routers.nocobase-app.rule=Host(`${APP_DOMAIN}`)"
+      - "traefik.http.routers.nocobase-app.entrypoints=websecure"
+      - "traefik.http.routers.nocobase-app.tls.certresolver=letsencrypt"
+      - "traefik.http.services.nocobase-app.loadbalancer.server.port=${APP_PORT}"
     
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${APP_PORT}/api/health"]
