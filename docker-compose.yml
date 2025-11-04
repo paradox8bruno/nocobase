@@ -1,80 +1,171 @@
-version: "3"
+version: "3.9"
+
 networks:
   nocobase:
     driver: bridge
+  dokploy-network:
+    external: true
+
 services:
-  verdaccio:
-    image: verdaccio/verdaccio
-    networks:
-      - nocobase
-    environment:
-      VERDACCIO_PORT: ${VERDACCIO_PORT}
-    restart: always
-    ports:
-      - "${VERDACCIO_PORT}:${VERDACCIO_PORT}"
+  # Banco de Dados MySQL
   mysql:
     image: mysql:8
+    container_name: nocobase-mysql
+    restart: always
+    networks:
+      - nocobase
     environment:
       MYSQL_DATABASE: ${DB_DATABASE}
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-    restart: always
-    ports:
-      - "${DB_MYSQL_PORT}:3306"
-    networks:
-      - nocobase
-  kingbase:
-    image: registry.cn-shanghai.aliyuncs.com/nocobase/kingbase:v009r001c001b0030_single_x86
-    platform: linux/amd64
-    restart: always
-    privileged: true
-    networks:
-      - nocobase
-    ports:
-      - "${DB_KINGBASE_PORT}:54321"
-    environment:
-      ENABLE_CI: no
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_MODE: pg
-      NEED_START: yes
-    command: ["/usr/sbin/init"]
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      TZ: ${TIMEZONE}
     volumes:
-      - ./storage/db/kingbase:/home/kingbase/userdata
+      - ../files/nocobase-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Banco de Dados PostgreSQL (alternativa ao MySQL)
   postgres:
-    image: postgres:latest
+    image: postgres:16-alpine
+    container_name: nocobase-postgres
     restart: always
     networks:
       - nocobase
     command: postgres -c wal_level=logical
-    ports:
-      - "${DB_POSTGRES_PORT}:5432"
-    volumes:
-      - ./storage/db/postgres/backups:/backups
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_DB: ${DB_DATABASE}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
-  adminer:
-    image: nocobase/adminer
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: ${TIMEZONE}
+    volumes:
+      - ../files/nocobase-postgres:/var/lib/postgresql/data
+      - ../files/nocobase-postgres-backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_DATABASE}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (Cache e Sessões)
+  redis:
+    image: redis:7-alpine
+    container_name: nocobase-redis
     restart: always
     networks:
       - nocobase
-    ports:
-      - ${ADMINER_PORT}:8080
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    environment:
+      TZ: ${TIMEZONE}
     volumes:
-      - ./:/var/www/app
-  nocobase:
-    image: node:16-stretch-slim
+      - ../files/nocobase-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Adminer (Interface de Administração do Banco)
+  adminer:
+    image: adminer:latest
+    container_name: nocobase-adminer
+    restart: always
     networks:
       - nocobase
-    command: [ "yarn", "start" ]
-    working_dir: /app
-    env_file: ./.env
+      - dokploy-network
+    environment:
+      ADMINER_DEFAULT_SERVER: ${DB_HOST}
+      TZ: ${TIMEZONE}
+    depends_on:
+      - mysql
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nocobase-adminer.rule=Host(`${ADMINER_DOMAIN}`)"
+      - "traefik.http.routers.nocobase-adminer.entrypoints=websecure"
+      - "traefik.http.routers.nocobase-adminer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.nocobase-adminer.loadbalancer.server.port=8080"
+      - "traefik.docker.network=dokploy-network"
+
+  # Aplicação NocoBase
+  nocobase:
+    image: nocobase/nocobase:latest
+    container_name: nocobase-app
+    restart: always
+    networks:
+      - nocobase
+      - dokploy-network
+    environment:
+      # Configurações da Aplicação
+      APP_ENV: ${APP_ENV}
+      APP_HOST: ${APP_HOST}
+      APP_PORT: ${APP_PORT}
+      APP_KEY: ${APP_KEY}
+      API_BASE_PATH: ${API_BASE_PATH}
+      API_BASE_URL: ${API_BASE_URL}
+      
+      # Configurações do Banco de Dados
+      DB_DIALECT: ${DB_DIALECT}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_TABLE_PREFIX: ${DB_TABLE_PREFIX}
+      DB_LOGGING: ${DB_LOGGING}
+      
+      # Configurações de Cache
+      CACHE_DEFAULT_STORE: ${CACHE_DEFAULT_STORE}
+      CACHE_REDIS_URL: ${CACHE_REDIS_URL}
+      
+      # Configurações de Storage
+      STORAGE_TYPE: ${STORAGE_TYPE}
+      STORAGE_BASE_URL: ${STORAGE_BASE_URL}
+      
+      # Timezone
+      TZ: ${TIMEZONE}
+      
+      # Configurações de Email (opcional)
+      MAIL_DRIVER: ${MAIL_DRIVER}
+      MAIL_FROM_ADDRESS: ${MAIL_FROM_ADDRESS}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME}
+      
+      # Configurações de Limite
+      LOGGER_TRANSPORT: ${LOGGER_TRANSPORT}
+      LOGGER_BASE_PATH: ${LOGGER_BASE_PATH}
+    
     volumes:
-      - ./:/app
-    expose:
-      - ${APP_PORT}
-    ports:
-      - "${APP_PORT}:${APP_PORT}"
+      - ../files/nocobase-storage:/app/storage
+      - ../files/nocobase-uploads:/app/uploads
+    
+    depends_on:
+      mysql:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nocobase.rule=Host(`${APP_DOMAIN}`)"
+      - "traefik.http.routers.nocobase.entrypoints=websecure"
+      - "traefik.http.routers.nocobase.tls.certresolver=letsencrypt"
+      - "traefik.http.services.nocobase.loadbalancer.server.port=${APP_PORT}"
+      - "traefik.docker.network=dokploy-network"
+      
+      # Headers de Segurança
+      - "traefik.http.middlewares.nocobase-headers.headers.customResponseHeaders.X-Robots-Tag=none,noarchive,nosnippet,notranslate,noimageindex"
+      - "traefik.http.middlewares.nocobase-headers.headers.sslProxyHeaders.X-Forwarded-Proto=https"
+      - "traefik.http.routers.nocobase.middlewares=nocobase-headers"
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${APP_PORT}/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
